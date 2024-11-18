@@ -24,6 +24,7 @@ module.exports = {
         path: "app/inference/gradio_composite_demo",                // Edit this to customize the path to start the shell from
         message: [
           "pip install -r requirements.txt",
+          "pip install git+https://github.com/zRzRzRzRzRzRzR/diffusers/tree/cogvideox1.1-5b"
         ]
       }
     },
