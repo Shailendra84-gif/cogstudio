@@ -37,7 +37,9 @@ import gc
 
 pipe = None
 pipe_image = None
+pipe_image2 = None
 pipe_video = None
+selected_i2v = None
 device = "cuda" if torch.cuda.is_available() else "cpu"
 hf_hub_download(repo_id="ai-forever/Real-ESRGAN", filename="RealESRGAN_x4.pth", local_dir="model_real_esran")
 snapshot_download(repo_id="AlexWortega/RIFE", local_dir="model_rife")
@@ -105,6 +107,8 @@ def init_vid2vid(name, dtype_str, full_gpu):
 def init_img2vid(name, dtype_str, full_gpu):
     global pipe
     global pipe_image
+    global pipe_image2
+    global selected_i2v
 
     torch.cuda.empty_cache()
     print("init cogvideox pipeline")
@@ -115,12 +119,23 @@ def init_img2vid(name, dtype_str, full_gpu):
     core_pipe = CogVideoXPipeline.from_pretrained(name, torch_dtype=dtype).to("cpu")
     core_pipe.scheduler = CogVideoXDPMScheduler.from_config(core_pipe.scheduler.config, timestep_spacing="trailing")
 
-    if pipe_image == None:
+    # using the existing i2v pipeline
+    if selected_i2v != None and selected_i2v == name:
+        print("use the existing i2v pipeline")
+    else:
+        # new or different pipeline. reset first.
+
+        pipe_image = None
+        pipe_image2 = None
+
+        selected_i2v = name
+        selected_i2v_name = f"{name}-I2V"
+
         print("init i2v_transformer pipeline")
-        i2v_transformer = CogVideoXTransformer3DModel.from_pretrained("THUDM/CogVideoX-5b-I2V", subfolder="transformer", torch_dtype=dtype).to("cpu")
+        i2v_transformer = CogVideoXTransformer3DModel.from_pretrained(selected_i2v, subfolder="transformer", torch_dtype=dtype).to("cpu")
         print("init cogvideox image2video pipeline")
-        pipe_image = CogVideoXImageToVideoPipeline.from_pretrained(
-            "THUDM/CogVideoX-5b-I2V",
+        p = CogVideoXImageToVideoPipeline.from_pretrained(
+            selected_i2v_name,
             transformer=i2v_transformer,
             vae=core_pipe.vae,
             scheduler=core_pipe.scheduler,
@@ -128,8 +143,15 @@ def init_img2vid(name, dtype_str, full_gpu):
             text_encoder=core_pipe.text_encoder,
             torch_dtype=dtype
         )#.to(device)
-        print("done")
-        optimize(pipe_image, full_gpu)
+
+        if selected_i2v.startswith("THUDM/CogVideoX1.5-5b"):
+            pipe_image2 = p
+            print("done")
+            optimize(pipe_image2, full_gpu)
+        else:
+            pipe_image = p
+            print("done")
+            optimize(pipe_image, full_gpu)
 
 os.makedirs("./output", exist_ok=True)
 os.makedirs("./gradio_tmp", exist_ok=True)
@@ -208,11 +230,20 @@ def infer(
     dtype: str,
     full_gpu: bool,
     seed: int = -1,
+    width: int,
+    height: int,
     progress=gr.Progress(track_tqdm=True),
 ):
     global pipe
     global pipe_video
     global pipe_image
+    global pipe_image2
+
+    num_frames = 49
+    fps = 8
+    if name.startswith("THUDM/CogVideoX1.5-5b"):
+        num_frames= 81
+        fps = 16
 
     init(name, image_input, video_input, dtype, full_gpu)
 
@@ -220,9 +251,11 @@ def infer(
         seed = random.randint(0, 2**8 - 1)
 
     if video_input is not None:
-        resized_video_input = resize_video(video_input)
+        resized_video_input = resize_video(video_input, fps=fps)
         video = load_video(resized_video_input)[:49]  # Limit to 49 frames
         video_pt = pipe_video(
+            width=width,
+            height=height,
             video=video,
             prompt=prompt,
             num_inference_steps=num_inference_steps,
@@ -242,16 +275,28 @@ def infer(
     elif image_input is not None:
         image_input = resize_image(Image.fromarray(image_input), (720, 480))
         image = load_image(image_input)
-        video_pt = pipe_image(
-            image=image,
-            prompt=prompt,
-            num_inference_steps=num_inference_steps,
-            num_videos_per_prompt=1,
-            use_dynamic_cfg=True,
-            output_type="pt",
-            guidance_scale=guidance_scale,
-            generator=torch.Generator(device="cpu").manual_seed(seed),
-        ).frames
+        if name.startswith("THUDM/CogVideoX1.5-5b"):
+            video_pt = pipe_image2(
+                image=image,
+                prompt=prompt,
+                num_inference_steps=num_inference_steps,
+                num_videos_per_prompt=1,
+                use_dynamic_cfg=True,
+                output_type="pt",
+                guidance_scale=guidance_scale,
+                generator=torch.Generator(device="cpu").manual_seed(seed),
+            ).frames
+        else:
+            video_pt = pipe_image(
+                image=image,
+                prompt=prompt,
+                num_inference_steps=num_inference_steps,
+                num_videos_per_prompt=1,
+                use_dynamic_cfg=True,
+                output_type="pt",
+                guidance_scale=guidance_scale,
+                generator=torch.Generator(device="cpu").manual_seed(seed),
+            ).frames
 
 #        pipe_image = None
 #        pipe = None
@@ -262,7 +307,7 @@ def infer(
             prompt=prompt,
             num_videos_per_prompt=1,
             num_inference_steps=num_inference_steps,
-            num_frames=49,
+            num_frames=num_frames,
             use_dynamic_cfg=True,
             output_type="pt",
             guidance_scale=guidance_scale,
@@ -301,7 +346,7 @@ def resize_image(img, target_size):
    
     return background
 
-def resize_video(input_path, target_size=(720, 480)):
+def resize_video(input_path, fps=8, target_size=(720, 480)):
 
     # Load the video clip
     clip = mp.VideoFileClip(input_path)
@@ -329,7 +374,7 @@ def resize_video(input_path, target_size=(720, 480)):
     input_dir = os.path.dirname(input_path)
     temp_output = os.path.join(input_dir, "temp_video.mp4")
 
-    resized_clip.write_videofile(temp_output, fps=8)
+    resized_clip.write_videofile(temp_output, fps=fps)
 
     # Close the clips
     clip.close()
@@ -432,7 +477,10 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
                                 enhance_button = gr.Button("✨ Enhance Prompt(Optional)")
 
                             with gr.Row():
-                                model_choice = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b"], value="THUDM/CogVideoX-2b", label="Model")
+                                model_choice = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b", "THUDM/CogVideoX1.5-5b"], value="THUDM/CogVideoX1.5-5b", label="Model")
+                            with gr.Row():
+                                width = gr.Number(value=720, label="Width")
+                                height = gr.Number(value=480, label="Height")
                             with gr.Row():
                                 num_inference_steps = gr.Number(label="Inference Steps", value=50)
                                 guidance_scale = gr.Number(label="Guidance Scale", value=6.0)
@@ -512,7 +560,10 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
                                 enhance_button2 = gr.Button("✨ Enhance Prompt(Optional)")
 
                             with gr.Row():
-                                model_choice2 = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b"], value="THUDM/CogVideoX-2b", label="Model")
+                                model_choice2 = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b", "THUDM/CogVideoX1.5-5b"], value="THUDM/CogVideoX-2b", label="Model")
+                            with gr.Row():
+                                width2 = gr.Number(value=720, label="Width")
+                                height2 = gr.Number(value=480, label="Height")
                             with gr.Row():
                                 num_inference_steps2 = gr.Number(label="Inference Steps", value=50)
                                 guidance_scale2 = gr.Number(label="Guidance Scale", value=6.0)
@@ -556,7 +607,10 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
                                 enhance_button3 = gr.Button("✨ Enhance Prompt(Optional)")
 
                             with gr.Row():
-                                model_choice3 = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b"], value="THUDM/CogVideoX-5b", label="Model", visible=False)
+                                model_choice3 = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b", "THUDM/CogVideoX1.5-5b"], value="THUDM/CogVideoX-2b", label="Model")
+                            with gr.Row():
+                                width3 = gr.Number(value=720, label="Width")
+                                height3 = gr.Number(value=480, label="Height")
                             with gr.Row():
                                 num_inference_steps3 = gr.Number(label="Inference Steps", value=50)
                                 guidance_scale3 = gr.Number(label="Guidance Scale", value=6.0)
@@ -604,7 +658,10 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
                                 enhance_button4 = gr.Button("✨ Enhance Prompt(Optional)")
 
                             with gr.Row():
-                                model_choice4 = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b"], value="THUDM/CogVideoX-5b", label="Model", visible=False)
+                                model_choice4 = gr.Dropdown(["THUDM/CogVideoX-2b", "THUDM/CogVideoX-5b", "THUDM/CogVideoX1.5-5b"], value="THUDM/CogVideoX1.5-5b", label="Model")
+                            with gr.Row():
+                                width4 = gr.Number(value=720, label="Width")
+                                height4 = gr.Number(value=480, label="Height")
                             with gr.Row():
                                 num_inference_steps4 = gr.Number(label="Inference Steps", value=50)
                                 guidance_scale4 = gr.Number(label="Guidance Scale", value=6.0)
@@ -667,8 +724,16 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
         scale_status,
         rife_status,
         full_gpu=full_gpu,
+        width=width,
+        height=height,
         progress=gr.Progress(track_tqdm=True)
     ):
+        num_frames = 49
+        fps = 8
+        if name.startswith("THUDM/CogVideoX1.5-5b"):
+            num_frames= 81
+            fps = 16
+
         # normal generation
         video_path, video_update, gif_update, seed_update, vid2vid_update, extendvid_update = generate(
             prompt,
@@ -683,12 +748,14 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
             scale_status,
             rife_status,
             full_gpu=full_gpu,
+            width=width,
+            height=height,
             progress=gr.Progress(track_tqdm=True)
         )
 
         # stitch video_to_extend with the generated video
         print(f"stitch {video_to_extend} {video_path} ts={ts}")
-        resized_video = resize_video(video_to_extend)
+        resized_video = resize_video(video_to_extend, fps=fps)
         video1 = mp.VideoFileClip(resized_video)
         video1 = video1.without_audio()
         cut_video1 = video1.subclip(0, ts)
@@ -721,6 +788,8 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
         scale_status,
         rife_status,
         full_gpu=full_gpu,
+        width=width,
+        height=height,
         progress=gr.Progress(track_tqdm=True)
     ):
 
@@ -802,7 +871,7 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
 #    ).then(
     g1 = generate_button.click(
         generate,
-        inputs=[prompt, image, video, strength, num_inference_steps, guidance_scale, model_choice, dtype_choice, seed_param, enable_scale, enable_rife, full_gpu],
+        inputs=[prompt, image, video, strength, num_inference_steps, guidance_scale, model_choice, dtype_choice, seed_param, enable_scale, enable_rife, full_gpu, width, height],
         #outputs=[video_output, download_video_button, download_gif_button, seed_text, send_to_vid2vid_button, send_to_extendvid_button, cancel_button],
         outputs=[video_output, download_video_button, download_gif_button, seed_text, send_to_vid2vid_button, send_to_extendvid_button, ],
     )
@@ -811,7 +880,7 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
 #    ).then(
     g2 = generate_button2.click(
         generate,
-        inputs=[prompt2, image2, video2, strength2, num_inference_steps2, guidance_scale2, model_choice2, dtype_choice2, seed_param2, enable_scale2, enable_rife2, full_gpu2],
+        inputs=[prompt2, image2, video2, strength2, num_inference_steps2, guidance_scale2, model_choice2, dtype_choice2, seed_param2, enable_scale2, enable_rife2, full_gpu2, width2, height2],
         #outputs=[video_output2, download_video_button2, download_gif_button2, seed_text2, send_to_vid2vid_button2, send_to_extendvid_button2, cancel_button2],
         outputs=[video_output2, download_video_button2, download_gif_button2, seed_text2, send_to_vid2vid_button2, send_to_extendvid_button2, ],
     )
@@ -820,7 +889,7 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
 #    ).then(
     g3 = generate_button3.click(
         generate,
-        inputs=[prompt3, image3, video3, strength3, num_inference_steps3, guidance_scale3, model_choice3, dtype_choice3, seed_param3, enable_scale3, enable_rife3, full_gpu3],
+        inputs=[prompt3, image3, video3, strength3, num_inference_steps3, guidance_scale3, model_choice3, dtype_choice3, seed_param3, enable_scale3, enable_rife3, full_gpu3, width3, height3],
         #outputs=[video_output3, download_video_button3, download_gif_button3, seed_text3, send_to_vid2vid_button3, send_to_extendvid_button3, cancel_button3],
         outputs=[video_output3, download_video_button3, download_gif_button3, seed_text3, send_to_vid2vid_button3, send_to_extendvid_button3, ],
     )
@@ -829,7 +898,7 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
 #    ).then(
     g4 = generate_button4.click(
         extend,
-        inputs=[prompt4, video_to_extend, extend_slider, extend_frame, video4, strength4, num_inference_steps4, guidance_scale4, model_choice4, dtype_choice4, seed_param4, enable_scale4, enable_rife4, full_gpu4],
+        inputs=[prompt4, video_to_extend, extend_slider, extend_frame, video4, strength4, num_inference_steps4, guidance_scale4, model_choice4, dtype_choice4, seed_param4, enable_scale4, enable_rife4, full_gpu4, width4, height4],
         #outputs=[video_output4, download_video_button4, download_gif_button4, seed_text4, send_to_vid2vid_button4, send_to_extendvid_button4, cancel_button4],
         outputs=[video_output4, download_video_button4, download_gif_button4, seed_text4, send_to_vid2vid_button4, send_to_extendvid_button4, ],
     )
