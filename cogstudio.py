@@ -229,8 +229,8 @@ def infer(
     guidance_scale: float,
     dtype: str,
     full_gpu: bool,
-    seed: int = -1,
     width: int,
+    seed: int = -1,
     height: int,
     progress=gr.Progress(track_tqdm=True),
 ):
