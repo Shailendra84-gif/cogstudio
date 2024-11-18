@@ -110,6 +110,8 @@ def init_img2vid(name, dtype_str, full_gpu):
     global pipe_image2
     global selected_i2v
 
+    print(f"> init_img2vid {name}, {dtype_str}")
+
     torch.cuda.empty_cache()
     print("init cogvideox pipeline")
     if dtype_str == "bfloat16":
