@@ -804,6 +804,8 @@ with gr.Blocks(fill_width=True, fill_height=True, css=css) as demo:
             dtype=dtype,
             full_gpu=full_gpu,
             seed=seed_value,
+            width=width,
+            height=height,
             progress=progress,
         )
         if scale_status:
