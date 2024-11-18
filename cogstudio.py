@@ -230,8 +230,8 @@ def infer(
     dtype: str,
     full_gpu: bool,
     width: int,
-    seed: int = -1,
     height: int,
+    seed: int = -1,
     progress=gr.Progress(track_tqdm=True),
 ):
     global pipe
