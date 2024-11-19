@@ -34,7 +34,7 @@ module.exports = {
         venv: "app/env",
         message: [
           "pip install -r requirements.txt",
-          "pip install git+https://github.com/zRzRzRzRzRzRzR/diffusers"
+//          "pip install git+https://github.com/zRzRzRzRzRzRzR/diffusers"
         ]
       }
     },
