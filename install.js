@@ -20,9 +20,10 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        venv: "app/env",
+        path: "app",
+        venv: "env",
         message: [
-          "pip install -e ../../diffusers"
+          "pip install -e ../diffusers"
         ]
       }
     },
