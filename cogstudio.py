@@ -266,6 +266,7 @@ def infer(
             use_dynamic_cfg=True,
             output_type="pt",
             guidance_scale=guidance_scale,
+            num_frames=num_frames,
             generator=torch.Generator(device="cpu").manual_seed(seed),
         ).frames
 
@@ -286,6 +287,7 @@ def infer(
                 use_dynamic_cfg=True,
                 output_type="pt",
                 guidance_scale=guidance_scale,
+                num_frames=num_frames,
                 generator=torch.Generator(device="cpu").manual_seed(seed),
             ).frames
         else:
@@ -297,6 +299,7 @@ def infer(
                 use_dynamic_cfg=True,
                 output_type="pt",
                 guidance_scale=guidance_scale,
+                num_frames=num_frames,
                 generator=torch.Generator(device="cpu").manual_seed(seed),
             ).frames
 
