@@ -6,6 +6,7 @@ module.exports = {
       params: {
         message: [
           "git clone https://github.com/THUDM/CogVideo app",
+          "git clone https://github.com/huggingface/diffusers"
         ]
       }
     },
@@ -14,6 +15,15 @@ module.exports = {
       params: {
         src: "cogstudio.py",
         dest: "app/inference/gradio_composite_demo/cogstudio.py"
+      }
+    },
+    {
+      method: "shell.run",
+      params: {
+        venv: "app/env",
+        message: [
+          "pip install -e ../../diffusers"
+        ]
       }
     },
     // Edit this step with your custom install commands
