@@ -280,6 +280,8 @@ def infer(
         image = load_image(image_input)
         if name.startswith("THUDM/CogVideoX1.5-5b"):
             video_pt = pipe_image2(
+                width=width,
+                height=height,
                 image=image,
                 prompt=prompt,
                 num_inference_steps=num_inference_steps,
@@ -292,6 +294,8 @@ def infer(
             ).frames
         else:
             video_pt = pipe_image(
+                width=width,
+                height=height,
                 image=image,
                 prompt=prompt,
                 num_inference_steps=num_inference_steps,
@@ -309,6 +313,8 @@ def infer(
         torch.cuda.empty_cache()
     else:
         video_pt = pipe(
+            width=width,
+            height=height,
             prompt=prompt,
             num_videos_per_prompt=1,
             num_inference_steps=num_inference_steps,
