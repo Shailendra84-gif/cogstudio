@@ -17,16 +17,6 @@ module.exports = {
         dest: "app/inference/gradio_composite_demo/cogstudio.py"
       }
     },
-    {
-      method: "shell.run",
-      params: {
-        path: "app",
-        venv: "env",
-        message: [
-          "pip install -e ../diffusers"
-        ]
-      }
-    },
     // Edit this step with your custom install commands
     {
       method: "shell.run",
@@ -46,6 +36,16 @@ module.exports = {
         message: [
           "pip install -r requirements.txt",
 //          "pip install git+https://github.com/zRzRzRzRzRzRzR/diffusers"
+        ]
+      }
+    },
+    {
+      method: "shell.run",
+      params: {
+        path: "app",
+        venv: "env",
+        message: [
+          "pip install -e ../diffusers --upgrade"
         ]
       }
     },
